@@ -14,7 +14,8 @@ st.set_page_config(
 
 BASE_DIR = Path(__file__).resolve().parent
 
-# 注意：虽然文件扩展名是 .csv，但实际内容是 Excel 文件
+# cox_coefficients.csv 的实际格式为 Excel 工作簿。
+# var_cp_all2_0.9.csv 和 risk_cut.csv 为标准 CSV 文件。
 COEF_FILE = BASE_DIR / "cox_coefficients.csv"
 RANGE_FILE = BASE_DIR / "var_cp_all2_0.9.csv"
 CUT_FILE = BASE_DIR / "risk_cut.csv"
@@ -24,37 +25,32 @@ CUT_FILE = BASE_DIR / "risk_cut.csv"
 # ============================================================
 @st.cache_data
 def load_model():
-    """
-    读取内置模型文件。
-
-    文件实际格式为 Excel 工作簿，即使扩展名为 .csv，
-    也统一使用 pd.read_excel(..., engine="openpyxl")。
-    """
+    """读取内置 Cox 系数、变量范围和风险阈值文件。"""
     try:
         coef_df = pd.read_excel(COEF_FILE, engine="openpyxl")
-        range_df = pd.read_excel(RANGE_FILE, engine="openpyxl")
-        cut_df = pd.read_excel(CUT_FILE, engine="openpyxl")
+        range_df = pd.read_csv(RANGE_FILE, encoding="utf-8-sig")
+        cut_df = pd.read_csv(CUT_FILE, encoding="utf-8-sig")
     except FileNotFoundError as error:
         raise FileNotFoundError(
             f"Model file not found: {error.filename}. "
-            "Please make sure all three built-in files are in the same folder as app.py."
+            "Please make sure all built-in files are in the same folder as app.py."
         ) from error
 
     coef_df = coef_df.copy()
     range_df = range_df.copy()
     cut_df = cut_df.copy()
 
-    coef_df.columns = [str(col).strip() for col in coef_df.columns]
-    range_df.columns = [str(col).strip() for col in range_df.columns]
-    cut_df.columns = [str(col).strip() for col in cut_df.columns]
+    coef_df.columns = [str(column).strip() for column in coef_df.columns]
+    range_df.columns = [str(column).strip() for column in range_df.columns]
+    cut_df.columns = [str(column).strip() for column in cut_df.columns]
 
     # --------------------------------------------------------
     # Cox 系数表
-    # 默认前两列：变量名、系数
+    # 默认前两列分别为变量名与 Cox 系数
     # --------------------------------------------------------
     if coef_df.shape[1] < 2:
         raise ValueError(
-            "cox_coefficients.csv 至少需要两列：变量名和 Cox coefficient。"
+            "cox_coefficients.csv must contain at least two columns."
         )
 
     coef_df = coef_df.iloc[:, :2].copy()
@@ -65,10 +61,8 @@ def load_model():
         coef_df["Coefficient"],
         errors="coerce",
     )
-
     coef_df = coef_df.dropna(subset=["Variable", "Coefficient"])
 
-    # 获取模型中心常数
     center_rows = coef_df.loc[
         coef_df["Variable"].str.lower().eq("center"),
         "Coefficient",
@@ -76,53 +70,58 @@ def load_model():
 
     if center_rows.empty:
         raise ValueError(
-            "cox_coefficients.csv 中必须包含名为 center 的模型常数。"
+            "cox_coefficients.csv must contain a row named 'center'."
         )
 
     center = float(center_rows.iloc[0])
 
-    # center 不作为普通预测变量
+    # center 仅用于最终从总分中扣除，不作为普通变量计算。
     coef_df = coef_df.loc[
         ~coef_df["Variable"].str.lower().eq("center")
     ].copy()
 
     # --------------------------------------------------------
-    # 连续变量临界值表
-    # 至少应包含 Variable、Low、High；
-    # var_name2 用于页面和结果的变量展示名称
+    # 连续变量范围表
+    # 需要 Variable、Low、High、var_name2、start value
     # --------------------------------------------------------
-    if range_df.shape[1] < 3:
-        raise ValueError(
-            "var_cp_all2_0.9.csv 至少需要三列：Variable、Low、High。"
-        )
-
-    # 若没有规范列名，则默认前 3 列依次为 Variable、Low、High
     if "Variable" not in range_df.columns:
         range_df = range_df.rename(
             columns={range_df.columns[0]: "Variable"}
         )
 
     if "Low" not in range_df.columns:
-        remaining_columns = [
-            col for col in range_df.columns if col != "Variable"
-        ]
-        range_df = range_df.rename(
-            columns={remaining_columns[0]: "Low"}
+        raise ValueError(
+            "var_cp_all2_0.9.csv must contain a 'Low' column."
         )
 
     if "High" not in range_df.columns:
-        remaining_columns = [
-            col
-            for col in range_df.columns
-            if col not in {"Variable", "Low"}
-        ]
-        range_df = range_df.rename(
-            columns={remaining_columns[0]: "High"}
+        raise ValueError(
+            "var_cp_all2_0.9.csv must contain a 'High' column."
         )
 
-    # 如果文件没有 var_name2，默认以 Variable 作为展示名称
     if "var_name2" not in range_df.columns:
         range_df["var_name2"] = range_df["Variable"]
+
+    # 兼容 start value 的不同列名写法。
+    normalized_columns = {
+        str(column).strip().lower().replace("_", " "): column
+        for column in range_df.columns
+    }
+
+    start_value_column = None
+    for candidate in ["start value", "startvalue", "start_value"]:
+        if candidate in normalized_columns:
+            start_value_column = normalized_columns[candidate]
+            break
+
+    if start_value_column is None:
+        raise ValueError(
+            "var_cp_all2_0.9.csv must contain a 'start value' column."
+        )
+
+    range_df = range_df.rename(
+        columns={start_value_column: "start_value"}
+    )
 
     range_df["Variable"] = range_df["Variable"].astype(str).str.strip()
     range_df["var_name2"] = range_df["var_name2"].fillna(
@@ -132,10 +131,14 @@ def load_model():
 
     range_df["Low"] = pd.to_numeric(range_df["Low"], errors="coerce")
     range_df["High"] = pd.to_numeric(range_df["High"], errors="coerce")
+    range_df["start_value"] = pd.to_numeric(
+        range_df["start_value"],
+        errors="coerce",
+    )
 
     # --------------------------------------------------------
-    # 风险分层阈值
-    # 从 risk_cut 文件中获取第一个有效数字
+    # 风险阈值
+    # 获取 risk_cut.csv 中第一个有效数值
     # --------------------------------------------------------
     numeric_values = pd.to_numeric(
         cut_df.stack(),
@@ -144,7 +147,7 @@ def load_model():
 
     if numeric_values.empty:
         raise ValueError(
-            "risk_cut.csv 中没有找到有效的风险分层阈值。"
+            "No valid risk cut-off was found in risk_cut.csv."
         )
 
     risk_cut = float(numeric_values.iloc[0])
@@ -155,7 +158,7 @@ def load_model():
 # 辅助函数
 # ============================================================
 def get_range_row(variable, range_df):
-    """获取某变量对应的 Low、High、var_name2 信息。"""
+    """获取指定变量对应的范围表记录。"""
     matched = range_df.loc[
         range_df["Variable"].astype(str).str.strip().eq(variable)
     ]
@@ -166,14 +169,14 @@ def get_range_row(variable, range_df):
     return matched.iloc[0]
 
 def get_display_name(variable, range_df):
-    """优先使用 var_cp_all2_0.9.csv 中的 var_name2 作为展示名称。"""
+    """优先使用范围表中的 var_name2。"""
     range_row = get_range_row(variable, range_df)
 
     if range_row is not None:
-        name = range_row.get("var_name2", variable)
+        display_name = range_row.get("var_name2", variable)
 
-        if pd.notna(name) and str(name).strip():
-            return str(name).strip()
+        if pd.notna(display_name) and str(display_name).strip():
+            return str(display_name).strip()
 
     fallback_names = {
         "Age": "Age",
@@ -194,7 +197,7 @@ def get_display_name(variable, range_df):
         "ldl": "LDL cholesterol",
         "hdl": "HDL cholesterol",
         "bun": "Blood urea nitrogen",
-        "smoking_status3": "Smoking history",
+        "smoking_status3": "Smoking history: Current smoker",
         "ADL2": "ADL: Mild",
         "ADL3": "ADL: Moderate",
         "ADL4": "ADL: Complete",
@@ -206,33 +209,23 @@ def get_display_name(variable, range_df):
 
 def get_default_value(variable, range_df):
     """
-    连续变量的默认初始值：
-    - 同时有 Low、High：取中点；
-    - 仅有 Low：使用 Low；
-    - 仅有 High：使用 High；
-    - 无范围数据：使用 0。
+    使用 var_cp_all2_0.9.csv 中的 start value 作为默认值。
+    缺失时使用 0.00。
     """
-    row = get_range_row(variable, range_df)
+    range_row = get_range_row(variable, range_df)
 
-    if row is None:
+    if range_row is None:
         return 0.0
 
-    low = row.get("Low")
-    high = row.get("High")
+    start_value = range_row.get("start_value")
 
-    if pd.notna(low) and pd.notna(high):
-        return float((float(low) + float(high)) / 2)
-
-    if pd.notna(low):
-        return float(low)
-
-    if pd.notna(high):
-        return float(high)
+    if pd.notna(start_value):
+        return float(start_value)
 
     return 0.0
 
 def model_contains_variable(variable, coef_df):
-    """判断变量是否进入 Cox 模型。"""
+    """判断变量是否在 Cox 模型中。"""
     return variable in set(coef_df["Variable"].astype(str))
 
 # ============================================================
@@ -241,21 +234,19 @@ def model_contains_variable(variable, coef_df):
 def get_user_inputs(coef_df, range_df):
     raw_values = {}
 
-    # --------------------------------------------------------
-    # 人口学变量
-    # 年龄、性别、教育程度、婚姻状况
-    # --------------------------------------------------------
     st.subheader("Demographic characteristics")
 
     col1, col2, col3, col4 = st.columns(4)
 
     with col1:
+        age_default = int(round(get_default_value("Age", range_df)))
+
         raw_values["Age"] = float(
             st.number_input(
                 "Age (years)",
                 min_value=0,
                 max_value=120,
-                value=70,
+                value=age_default,
                 step=1,
                 format="%d",
             )
@@ -266,7 +257,7 @@ def get_user_inputs(coef_df, range_df):
             "Sex",
             ["Female", "Male"],
         )
-        raw_values["Sex"] = 0 if sex == "Female" else 1
+        raw_values["Sex"] = int(sex == "Male")
 
     with col3:
         education = st.selectbox(
@@ -292,14 +283,10 @@ def get_user_inputs(coef_df, range_df):
             "Marital status",
             ["Partnered", "Unpartnered"],
         )
-        raw_values["marital_status"] = (
-            0 if marital == "Partnered" else 1
+        raw_values["marital_status"] = int(
+            marital == "Unpartnered"
         )
 
-    # --------------------------------------------------------
-    # 健康行为和功能状态
-    # smoking history, ADL, self-rated health
-    # --------------------------------------------------------
     st.subheader("Health behaviors and functional status")
 
     col1, col2, col3 = st.columns(3)
@@ -314,12 +301,10 @@ def get_user_inputs(coef_df, range_df):
         )
 
     with col2:
-        # 根据要求：仅显示 Independent、Mild、Moderate、Complete
         adl = st.selectbox(
             "ADL",
             ["Independent", "Mild", "Moderate", "Complete"],
         )
-
         raw_values["ADL2"] = int(adl == "Mild")
         raw_values["ADL3"] = int(adl == "Moderate")
         raw_values["ADL4"] = int(adl == "Complete")
@@ -333,52 +318,33 @@ def get_user_inputs(coef_df, range_df):
             self_rated_health == "Suboptimal"
         )
 
-    # --------------------------------------------------------
-    # 心代谢慢病情况
-    # 用于得到 CMM_counts2
-    # --------------------------------------------------------
     st.subheader("Cardiometabolic conditions")
 
     col1, col2, col3, col4 = st.columns(4)
 
     with col1:
-        hypertension = st.selectbox(
-            "Hypertension",
-            ["No", "Yes"],
-        )
+        hypertension = st.selectbox("Hypertension", ["No", "Yes"])
 
     with col2:
-        diabetes = st.selectbox(
-            "Diabetes",
-            ["No", "Yes"],
-        )
+        diabetes = st.selectbox("Diabetes", ["No", "Yes"])
 
     with col3:
-        stroke = st.selectbox(
-            "Stroke",
-            ["No", "Yes"],
-        )
+        stroke = st.selectbox("Stroke", ["No", "Yes"])
 
     with col4:
-        heart_disease = st.selectbox(
-            "Heart disease",
-            ["No", "Yes"],
-        )
+        heart_disease = st.selectbox("Heart disease", ["No", "Yes"])
 
-    cmm_count = sum(
-        [
-            hypertension == "Yes",
-            diabetes == "Yes",
-            stroke == "Yes",
-            heart_disease == "Yes",
-        ]
+    raw_values["CMM_counts2"] = float(
+        sum(
+            [
+                hypertension == "Yes",
+                diabetes == "Yes",
+                stroke == "Yes",
+                heart_disease == "Yes",
+            ]
+        )
     )
 
-    raw_values["CMM_counts2"] = float(cmm_count)
-
-    # --------------------------------------------------------
-    # 体格检查：身高、体重和 BMI
-    # --------------------------------------------------------
     st.subheader("Physical examination")
 
     col1, col2, col3 = st.columns(3)
@@ -403,19 +369,14 @@ def get_user_inputs(coef_df, range_df):
             format="%.2f",
         )
 
-    bmi = weight / ((height / 100.0) ** 2)
-    raw_values["BMI"] = float(bmi)
+    raw_values["BMI"] = float(weight / ((height / 100.0) ** 2))
 
     with col3:
         st.metric(
             "Calculated BMI (kg/m²)",
-            f"{bmi:.2f}",
+            f"{raw_values['BMI']:.2f}",
         )
 
-    # --------------------------------------------------------
-    # 血压及血检指标
-    # SP、DP 使用整数；其余连续变量使用两位小数
-    # --------------------------------------------------------
     st.subheader("Clinical and laboratory measurements")
 
     possible_continuous_variables = [
@@ -433,7 +394,6 @@ def get_user_inputs(coef_df, range_df):
         "bun",
     ]
 
-    # 只有变量存在于范围表或 Cox 表时才显示
     continuous_variables = [
         variable
         for variable in possible_continuous_variables
@@ -450,7 +410,6 @@ def get_user_inputs(coef_df, range_df):
         default_value = get_default_value(variable, range_df)
 
         with columns[index % 3]:
-            # 收缩压、舒张压默认显示为整数
             if variable in {"SP", "DP"}:
                 raw_values[variable] = float(
                     st.number_input(
@@ -462,8 +421,6 @@ def get_user_inputs(coef_df, range_df):
                         format="%d",
                     )
                 )
-
-            # 其他连续变量默认显示两位小数
             else:
                 raw_values[variable] = float(
                     st.number_input(
@@ -482,35 +439,26 @@ def get_user_inputs(coef_df, range_df):
 # ============================================================
 def calculate_score(raw_values, coef_df, range_df, center):
     """
-    评分逻辑：
+    Cox 评分：
 
-    1. center 为模型基线常数；
-    2. 连续变量：
-       若数值低于 Low 或高于 High，则计入该变量的 Cox coefficient；
-    3. 分类变量：
-       若对应哑变量为 1，则计入 Cox coefficient；
-    4. 最终只保留产生实际贡献的危险指标。
+    1. 连续变量低于 Low 或高于 High 时，加入对应 Cox 系数；
+    2. 分类变量值为 1 时，加入对应 Cox 系数；
+    3. 最终风险评分为所有贡献值之和减去 center；
+    4. 输出所有实际参与风险评分的变量及其贡献。
     """
-    coefficient_map = dict(
-        zip(
-            coef_df["Variable"].astype(str),
-            coef_df["Coefficient"].astype(float),
-        )
-    )
-
-    score = float(center)
+    score = -float(center)
     contribution_rows = []
 
-    for variable, coefficient in coefficient_map.items():
+    for row in coef_df.itertuples(index=False):
+        variable = str(row.Variable).strip()
+        coefficient = float(row.Coefficient)
         value = float(raw_values.get(variable, 0))
+
         contribution = 0.0
         indicator_text = None
-
         range_row = get_range_row(variable, range_df)
 
-        # ----------------------------------------------------
-        # 连续变量：根据 Low / High 判断是否进入危险范围
-        # ----------------------------------------------------
+        # 连续变量：数值位于 Low / High 定义的危险范围时贡献 Cox 系数。
         if range_row is not None:
             low = range_row.get("Low")
             high = range_row.get("High")
@@ -521,24 +469,19 @@ def calculate_score(raw_values, coef_df, range_df, center):
                 indicator_text = (
                     f"{display_name} < {float(low):.2f}"
                 )
-
             elif pd.notna(high) and value > float(high):
                 contribution = coefficient
                 indicator_text = (
                     f"{display_name} > {float(high):.2f}"
                 )
 
-        # ----------------------------------------------------
-        # 分类变量：值为 1 时计入系数
-        # ----------------------------------------------------
+        # 分类变量：哑变量为 1 时贡献 Cox 系数。
         elif value == 1:
             contribution = coefficient
             indicator_text = get_display_name(variable, range_df)
 
-        score += contribution
-
-        # 只保存实际贡献指标
-        if contribution != 0 and indicator_text is not None:
+        if contribution != 0:
+            score += contribution
             contribution_rows.append(
                 {
                     "Contributing indicator": indicator_text,
@@ -551,7 +494,7 @@ def calculate_score(raw_values, coef_df, range_df, center):
     if not contribution_df.empty:
         contribution_df = contribution_df.sort_values(
             by="Contribution",
-            key=lambda series: series.abs(),
+            key=lambda values: values.abs(),
             ascending=False,
         ).reset_index(drop=True)
 
@@ -565,33 +508,24 @@ def calculate_score(raw_values, coef_df, range_df, center):
 # 结果卡片
 # ============================================================
 def show_result_cards(score, risk_cut):
-    """
-    只显示：
-    - Risk score
-    - Risk cut-off（显示 High risk / Low risk，而非具体阈值）
-    """
+    """展示最终评分和风险分层。"""
     is_high_risk = score >= risk_cut
 
     if is_high_risk:
         score_background = "#FEF2F2"
         score_border = "#EF4444"
         score_color = "#B91C1C"
-
         risk_background = "#FEE2E2"
         risk_border = "#DC2626"
         risk_color = "#B91C1C"
-
         risk_label = "High risk"
-
     else:
         score_background = "#EFF6FF"
         score_border = "#3B82F6"
         score_color = "#1D4ED8"
-
         risk_background = "#DBEAFE"
         risk_border = "#2563EB"
         risk_color = "#1D4ED8"
-
         risk_label = "Low risk"
 
     score_col, risk_col = st.columns(2)
@@ -602,7 +536,7 @@ def show_result_cards(score, risk_cut):
             <div style="
                 background-color: {score_background};
                 border: 1px solid {score_border};
-                border-radius: 14px;
+                border-radius: 8px;
                 padding: 24px;
                 text-align: center;
             ">
@@ -631,7 +565,7 @@ def show_result_cards(score, risk_cut):
             <div style="
                 background-color: {risk_background};
                 border: 1px solid {risk_border};
-                border-radius: 14px;
+                border-radius: 8px;
                 padding: 24px;
                 text-align: center;
             ">
@@ -687,9 +621,9 @@ def main():
         show_result_cards(score, risk_cut)
 
         st.caption(
-            "Reference only: The calculated risk score and risk classification "
-            "are for research and educational purposes only and do not replace "
-            "professional clinical assessment, diagnosis, or medical advice."
+            "Reference only: This risk score and classification are intended "
+            "for research and educational purposes only. They do not replace "
+            "clinical assessment, diagnosis, or medical advice."
         )
 
         st.divider()
@@ -697,8 +631,7 @@ def main():
 
         if contribution_df.empty:
             st.info(
-                "No model-defined contributing risk indicators were identified "
-                "from the entered values."
+                "No model-defined contributing indicators were identified."
             )
         else:
             st.dataframe(
@@ -709,8 +642,8 @@ def main():
 
     st.divider()
     st.caption(
-        "Reference only: This calculator is intended for research and educational "
-        "use and must not be used as the sole basis for clinical decision-making."
+        "Reference only: This calculator must not be used as the sole basis "
+        "for clinical decision-making."
     )
 
 if __name__ == "__main__":
