@@ -33,20 +33,13 @@ CATEGORICAL_GROUPS = {
 }
 
 EDUCATION_OPTIONS = {
-    "Illiterate/semi-literate": "Education1",
+    "Illiterate": "Education1",
+    "Semi-literate": "Education1",
     "Primary": "Education2",
     "Middle": "Education3",
     "High": "Education4",
     "Vocational": "Education4",
     "College or above": "Education5",
-}
-
-EDUCATION_DISPLAY_NAMES = {
-    "Education1": "Illiterate/semi-literate",
-    "Education2": "Primary",
-    "Education3": "Middle",
-    "Education4": "High/vocational",
-    "Education5": "College or above",
 }
 
 ADL_OPTIONS = {
@@ -56,30 +49,66 @@ ADL_OPTIONS = {
     "Complete": "ADL4",
 }
 
-ADL_DISPLAY_NAMES = {
-    "ADL2": "Mild",
-    "ADL3": "Moderate",
-    "ADL4": "Complete",
+VARIABLE_LABELS = {
+    "Age": "Age",
+    "Sex": "Sex",
+    "marital_status": "Marital status",
+    "SRH": "Self-rated health",
+    "CMM_counts2": "Cardiometabolic condition count",
+    "BMI": "BMI",
+    "SP": "Systolic blood pressure",
+    "DP": "Diastolic blood pressure",
+    "hb": "Haemoglobin",
+    "wbc": "White blood cell count",
+    "plt": "Platelet count",
+    "fbg": "Fasting blood glucose",
+    "scr": "Serum creatinine",
+    "tc": "Total cholesterol",
+    "tg": "Triglycerides",
+    "ldl": "LDL cholesterol",
+    "ldl-c": "LDL cholesterol",
+    "hdl": "HDL cholesterol",
+    "bun": "Blood urea nitrogen",
+    "smoking_status3": "Smoking status",
 }
 
-def read_model_file(path):
-    return pd.read_excel(path, engine="openpyxl")
+BINARY_INPUT_VARIABLES = {
+    "Sex",
+    "marital_status",
+    "SRH",
+    "smoking_status3",
+    "CMM_counts2",
+}
 
-def clean_dataframe(df):
-    df = df.copy()
-    df.columns = [str(col).strip() for col in df.columns]
+PHYSICAL_VARIABLES = {
+    "BMI",
+    "SP",
+}
 
-    for col in df.columns:
-        if df[col].dtype == object:
-            df[col] = df[col].astype(str).str.strip()
-
-    return df
+MEASUREMENT_VARIABLES = {
+    "DP",
+    "hb",
+    "wbc",
+    "plt",
+    "fbg",
+    "scr",
+    "tc",
+    "tg",
+    "ldl",
+    "ldl-c",
+    "hdl",
+    "bun",
+}
 
 @st.cache_data
 def load_model():
-    coef_df = clean_dataframe(read_model_file(COEF_FILE))
-    range_df = clean_dataframe(read_model_file(RANGE_FILE))
-    cut_df = clean_dataframe(read_model_file(CUT_FILE))
+    coef_df = pd.read_excel(COEF_FILE, engine="openpyxl")
+    range_df = pd.read_excel(RANGE_FILE, engine="openpyxl")
+    cut_df = pd.read_excel(CUT_FILE, engine="openpyxl")
+
+    coef_df = clean_dataframe(coef_df)
+    range_df = clean_dataframe(range_df)
+    cut_df = clean_dataframe(cut_df)
 
     variable_col = next(
         (
@@ -166,47 +195,32 @@ def load_model():
 
     return coef_df, range_df, risk_cut
 
+def clean_dataframe(df):
+    df = df.copy()
+    df.columns = [str(col).strip() for col in df.columns]
+
+    for col in df.columns:
+        if df[col].dtype == object:
+            df[col] = df[col].astype(str).str.strip()
+
+    return df
+
 def get_range_row(variable, range_df):
     matches = range_df.loc[range_df["Variable"].eq(variable)]
     return None if matches.empty else matches.iloc[0]
+
+def get_model_variables(coef_df):
+    return set(coef_df["Variable"].astype(str).str.strip())
 
 def get_display_name(variable, range_df):
     row = get_range_row(variable, range_df)
 
     if row is not None and pd.notna(row["var_name2"]):
         name = str(row["var_name2"]).strip()
-        if name:
+        if name and name.lower() != "nan":
             return name
 
-    return {
-        "Age": "Age",
-        "Sex": "Sex",
-        "marital_status": "Marital status",
-        "SRH": "Self-rated health",
-        "CMM_counts2": "Cardiometabolic condition count",
-        "BMI": "BMI",
-        "SP": "Systolic blood pressure",
-        "DP": "Diastolic blood pressure",
-        "hb": "Haemoglobin",
-        "wbc": "White blood cell count",
-        "plt": "Platelet count",
-        "fbg": "Fasting blood glucose",
-        "scr": "Serum creatinine",
-        "tc": "Total cholesterol",
-        "tg": "Triglycerides",
-        "ldl": "LDL cholesterol",
-        "hdl": "HDL cholesterol",
-        "bun": "Blood urea nitrogen",
-        "smoking_status3": "Smoking status",
-        "ADL2": "ADL: Mild",
-        "ADL3": "ADL: Moderate",
-        "ADL4": "ADL: Complete",
-        "Education1": "Education: Illiterate/semi-literate",
-        "Education2": "Education: Primary",
-        "Education3": "Education: Middle",
-        "Education4": "Education: High/vocational",
-        "Education5": "Education: College or above",
-    }.get(variable, variable)
+    return VARIABLE_LABELS.get(variable, variable)
 
 def get_default_value(variable, range_df):
     row = get_range_row(variable, range_df)
@@ -216,29 +230,43 @@ def get_default_value(variable, range_df):
 
     return float(row["start_value"])
 
-def get_user_inputs(range_df):
+def get_user_inputs(coef_df, range_df):
     raw_values = {}
-    display_values = {}
+    model_variables = get_model_variables(coef_df)
+
+    st.markdown(
+        "# ❤️ Cardiometabolic Multimorbidity Risk Prediction"
+    )
 
     st.subheader("Demographic characteristics")
-    c1, c2, c3, c4 = st.columns(4)
+    demographic_variables = [
+        variable
+        for variable in ["Age", "Sex"]
+        if variable in model_variables
+    ]
+    demographic_columns = st.columns(max(len(demographic_variables), 1))
 
-    with c1:
-        raw_values["Age"] = float(
-            st.number_input(
-                "Age (years)",
-                min_value=0,
-                max_value=120,
-                value=70,
-                step=1,
+    if "Age" in model_variables:
+        with demographic_columns[0]:
+            raw_values["Age"] = float(
+                st.number_input(
+                    "Age (years)",
+                    min_value=0,
+                    max_value=120,
+                    value=70,
+                    step=1,
+                )
             )
-        )
 
-    with c2:
-        sex = st.selectbox("Sex", ["Female", "Male"])
-        raw_values["Sex"] = int(sex == "Male")
+    if "Sex" in model_variables:
+        with demographic_columns[min(1, len(demographic_columns) - 1)]:
+            sex = st.selectbox("Sex", ["Female", "Male"])
+            raw_values["Sex"] = int(sex == "Male")
 
-    with c3:
+    if any(
+        variable in model_variables
+        for variable in CATEGORICAL_GROUPS["Education"]
+    ):
         education = st.selectbox(
             "Education",
             list(EDUCATION_OPTIONS.keys()),
@@ -248,58 +276,85 @@ def get_user_inputs(range_df):
             raw_values[variable] = 0
 
         education_variable = EDUCATION_OPTIONS[education]
-        raw_values[education_variable] = 1
-        display_values["education"] = education
+        if education_variable in model_variables:
+            raw_values[education_variable] = 1
 
-    with c4:
+        raw_values["_education_label"] = education
+
+    if "marital_status" in model_variables:
         marital = st.selectbox(
             "Marital status",
             ["Partnered", "Unpartnered"],
         )
         raw_values["marital_status"] = int(marital == "Unpartnered")
+        raw_values["_marital_label"] = marital
 
     st.subheader("Health behaviors and functional status")
-    c1, c2, c3 = st.columns(3)
+    health_variables = []
 
-    with c1:
-        smoking = st.selectbox(
-            "Smoking history",
-            ["Never-smoker", "Ex-smoker", "Current smoker"],
-        )
-        raw_values["smoking_status3"] = int(smoking == "Current smoker")
-        display_values["smoking"] = smoking
+    if "smoking_status3" in model_variables:
+        health_variables.append("smoking_status3")
 
-    with c2:
-        adl = st.selectbox(
-            "ADL",
-            list(ADL_OPTIONS.keys()),
-        )
+    if any(
+        variable in model_variables
+        for variable in CATEGORICAL_GROUPS["ADL"]
+    ):
+        health_variables.append("ADL")
 
-        for variable in CATEGORICAL_GROUPS["ADL"]:
-            raw_values[variable] = 0
+    if "SRH" in model_variables:
+        health_variables.append("SRH")
 
-        adl_variable = ADL_OPTIONS[adl]
-        if adl_variable is not None:
-            raw_values[adl_variable] = 1
-        display_values["adl"] = adl
+    health_columns = st.columns(max(len(health_variables), 1))
 
-    with c3:
-        srh = st.selectbox(
-            "Self-rated health",
-            ["Optimal", "Suboptimal"],
-        )
-        raw_values["SRH"] = int(srh == "Suboptimal")
+    health_index = 0
+
+    if "smoking_status3" in model_variables:
+        with health_columns[health_index]:
+            smoking = st.selectbox(
+                "Smoking status",
+                ["Never-smoker", "Ex-smoker", "Current smoker"],
+            )
+            raw_values["smoking_status3"] = int(
+                smoking == "Current smoker"
+            )
+            raw_values["_smoking_label"] = smoking
+        health_index += 1
+
+    if "ADL" in health_variables:
+        with health_columns[health_index]:
+            adl = st.selectbox(
+                "ADL",
+                list(ADL_OPTIONS.keys()),
+            )
+
+            for variable in CATEGORICAL_GROUPS["ADL"]:
+                raw_values[variable] = 0
+
+            adl_variable = ADL_OPTIONS[adl]
+            if adl_variable in model_variables:
+                raw_values[adl_variable] = 1
+
+            raw_values["_adl_label"] = adl
+        health_index += 1
+
+    if "SRH" in model_variables:
+        with health_columns[health_index]:
+            srh = st.selectbox(
+                "Self-rated health",
+                ["Optimal", "Suboptimal"],
+            )
+            raw_values["SRH"] = int(srh == "Suboptimal")
 
     st.subheader("Cardiometabolic conditions")
-    c1, c2, c3, c4 = st.columns(4)
+    condition_columns = st.columns(4)
 
-    with c1:
+    with condition_columns[0]:
         hypertension = st.selectbox("Hypertension", ["No", "Yes"])
-    with c2:
+    with condition_columns[1]:
         diabetes = st.selectbox("Diabetes", ["No", "Yes"])
-    with c3:
+    with condition_columns[2]:
         stroke = st.selectbox("Stroke", ["No", "Yes"])
-    with c4:
+    with condition_columns[3]:
         heart = st.selectbox("Heart disease", ["No", "Yes"])
 
     condition_count = sum(
@@ -319,13 +374,23 @@ def get_user_inputs(range_df):
             "Please select at least two cardiometabolic conditions."
         )
 
-    # count = 2 编码为0；count >= 3 编码为1
+    # Exactly 2 conditions -> 0; 3 or more conditions -> 1
     raw_values["CMM_counts2"] = int(condition_count >= 3)
 
     st.subheader("Physical examination")
-    c1, c2, c3 = st.columns(3)
+    physical_variables = [
+        variable
+        for variable in ["BMI", "SP"]
+        if variable in model_variables
+    ]
 
-    with c1:
+    physical_columns = st.columns(max(len(physical_variables) + 2, 1))
+    physical_index = 0
+
+    height = None
+    weight = None
+
+    with physical_columns[physical_index]:
         height = st.number_input(
             "Height",
             min_value=50.0,
@@ -334,8 +399,9 @@ def get_user_inputs(range_df):
             step=0.01,
             format="%.2f",
         )
+    physical_index += 1
 
-    with c2:
+    with physical_columns[physical_index]:
         weight = st.number_input(
             "Weight",
             min_value=20.0,
@@ -344,49 +410,46 @@ def get_user_inputs(range_df):
             step=0.01,
             format="%.2f",
         )
+    physical_index += 1
 
-    raw_values["BMI"] = float(weight / ((height / 100.0) ** 2))
+    calculated_bmi = float(weight / ((height / 100.0) ** 2))
 
-    with c3:
-        st.metric(
-            "Calculated BMI",
-            f"{raw_values['BMI']:.2f}",
-        )
+    if "BMI" in model_variables:
+        raw_values["BMI"] = calculated_bmi
+        with physical_columns[physical_index]:
+            st.metric("BMI", f"{calculated_bmi:.2f}")
+        physical_index += 1
+
+    if "SP" in model_variables:
+        default_sp = get_default_value("SP", range_df)
+        with physical_columns[physical_index]:
+            raw_values["SP"] = float(
+                st.number_input(
+                    get_display_name("SP", range_df),
+                    min_value=0,
+                    max_value=300,
+                    value=int(round(default_sp)),
+                    step=1,
+                )
+            )
 
     st.subheader("Clinical and laboratory measurements")
-    ordered_vars = [
-        "SP",
-        "DP",
-        "hb",
-        "wbc",
-        "plt",
-        "fbg",
-        "scr",
-        "tc",
-        "tg",
-        "ldl",
-        "hdl",
-        "bun",
+    laboratory_variables = [
+        variable
+        for variable in coef_df["Variable"].tolist()
+        if variable in MEASUREMENT_VARIABLES
+        and variable in model_variables
+        and variable not in PHYSICAL_VARIABLES
     ]
 
-    cols = st.columns(3)
+    if laboratory_variables:
+        laboratory_columns = st.columns(len(laboratory_variables))
 
-    for index, variable in enumerate(ordered_vars):
-        with cols[index % 3]:
-            label = get_display_name(variable, range_df)
-            default = get_default_value(variable, range_df)
+        for index, variable in enumerate(laboratory_variables):
+            with laboratory_columns[index]:
+                label = get_display_name(variable, range_df)
+                default = get_default_value(variable, range_df)
 
-            if variable in {"SP", "DP"}:
-                raw_values[variable] = float(
-                    st.number_input(
-                        label,
-                        min_value=0,
-                        max_value=300,
-                        value=int(round(default)),
-                        step=1,
-                    )
-                )
-            else:
                 raw_values[variable] = float(
                     st.number_input(
                         label,
@@ -397,20 +460,9 @@ def get_user_inputs(range_df):
                     )
                 )
 
-    raw_values["_education_label"] = display_values["education"]
-    raw_values["_smoking_label"] = display_values["smoking"]
-    raw_values["_adl_label"] = display_values["adl"]
-
     return raw_values, condition_count
 
 def calculate_score(raw_values, coef_df, range_df):
-    """
-    每个变量的贡献为：
-
-        contribution = coefficient * model_value - center_value
-
-    Age 使用原始连续值；Education 和 ADL 分别累加所有哑变量贡献。
-    """
     score = 0.0
     details = []
     processed_variables = set()
@@ -439,10 +491,14 @@ def calculate_score(raw_values, coef_df, range_df):
 
             if pd.notna(low) and raw_value < float(low):
                 model_value = 1.0
-                condition = f"{raw_value:.2f} (< {float(low):.2f})"
+                condition = (
+                    f"{raw_value:.2f} (< {float(low):.2f})"
+                )
             elif pd.notna(high) and raw_value > float(high):
                 model_value = 1.0
-                condition = f"{raw_value:.2f} (> {float(high):.2f})"
+                condition = (
+                    f"{raw_value:.2f} (> {float(high):.2f})"
+                )
             else:
                 model_value = 0.0
                 condition = ""
@@ -454,13 +510,20 @@ def calculate_score(raw_values, coef_df, range_df):
         contribution = coefficient * model_value - center_value
         return contribution, condition
 
+    # Education and ADL are calculated as grouped dummy-variable terms.
     for group_name, variables in CATEGORICAL_GROUPS.items():
+        included_variables = [
+            variable
+            for variable in variables
+            if variable in coefficient_map.index
+        ]
+
+        if not included_variables:
+            continue
+
         group_contribution = 0.0
 
-        for variable in variables:
-            if variable not in coefficient_map.index:
-                continue
-
+        for variable in included_variables:
             contribution, _ = get_variable_contribution(variable)
             group_contribution += contribution
             processed_variables.add(variable)
@@ -488,6 +551,7 @@ def calculate_score(raw_values, coef_df, range_df):
                 }
             )
 
+    # Calculate all remaining variables included in the model.
     for entry in coef_df.itertuples(index=False):
         variable = str(entry.Variable).strip()
 
@@ -497,30 +561,62 @@ def calculate_score(raw_values, coef_df, range_df):
         contribution, condition = get_variable_contribution(variable)
         score += contribution
 
-        if contribution > 0:
-            if variable == "Age":
-                indicator_name = f"Age: {raw_values['Age']:.0f} years"
-            elif variable == "smoking_status3":
-                smoking_label = raw_values.get(
-                    "_smoking_label",
-                    "Current smoker",
-                )
-                indicator_name = f"Smoking status: {smoking_label}"
-            elif variable in {"Sex", "marital_status", "SRH"}:
-                indicator_name = get_display_name(variable, range_df)
-            elif condition:
-                display_name = get_display_name(variable, range_df)
-                indicator_name = f"{display_name}: {condition}"
-            else:
-                display_name = get_display_name(variable, range_df)
-                indicator_name = f"{display_name}: present"
+        if contribution <= 0:
+            continue
 
-            details.append(
-                {
-                    "Contributing risk indicator": indicator_name,
-                    "Contribution": contribution,
-                }
+        if variable == "Age":
+            indicator_name = (
+                f"Age: {raw_values.get('Age', 0):.0f} years"
             )
+
+        elif variable == "CMM_counts2":
+            if raw_values.get("CMM_counts2", 0) == 1:
+                indicator_name = (
+                    "Cardiometabolic condition count: ≥3 conditions"
+                )
+            else:
+                indicator_name = (
+                    "Cardiometabolic condition count: 2 conditions"
+                )
+
+        elif variable == "smoking_status3":
+            smoking_label = raw_values.get(
+                "_smoking_label",
+                "Current smoker",
+            )
+            indicator_name = f"Smoking status: {smoking_label}"
+
+        elif variable == "marital_status":
+            marital_label = raw_values.get(
+                "_marital_label",
+                "Unpartnered",
+            )
+            indicator_name = f"Marital status: {marital_label}"
+
+        elif variable == "Sex":
+            indicator_name = f"Sex: {'Male' if raw_values.get('Sex', 0) == 1 else 'Female'}"
+
+        elif variable == "SRH":
+            indicator_name = (
+                "Self-rated health: Suboptimal"
+                if raw_values.get("SRH", 0) == 1
+                else "Self-rated health: Optimal"
+            )
+
+        elif condition:
+            display_name = get_display_name(variable, range_df)
+            indicator_name = f"{display_name}: {condition}"
+
+        else:
+            display_name = get_display_name(variable, range_df)
+            indicator_name = f"{display_name}: present"
+
+        details.append(
+            {
+                "Contributing risk indicator": indicator_name,
+                "Contribution": contribution,
+            }
+        )
 
     details_df = pd.DataFrame(details)
 
@@ -588,10 +684,11 @@ def render_result_cards(score, threshold):
         )
 
 def main():
-    st.title("Cardiometabolic Multimorbidity Risk Prediction")
-
     coef_df, range_df, risk_cut = load_model()
-    user_inputs, condition_count = get_user_inputs(range_df)
+    user_inputs, condition_count = get_user_inputs(
+        coef_df,
+        range_df,
+    )
 
     st.divider()
 
