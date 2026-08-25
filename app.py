@@ -16,8 +16,41 @@ COEF_FILE = BASE_DIR / "cox_coefficients.csv"
 RANGE_FILE = BASE_DIR / "var_cp_all2_0.9.csv"
 CUT_FILE = BASE_DIR / "risk_cut.csv"
 
+# Age 使用原始连续值
+CONTINUOUS_VARIABLES = {"Age"}
+
+# 多分类变量分别由多个哑变量组成
+CATEGORICAL_GROUPS = {
+    "Education": [
+        "Education1",
+        "Education2",
+        "Education3",
+        "Education4",
+        "Education5",
+    ],
+    "ADL": [
+        "ADL2",
+        "ADL3",
+        "ADL4",
+    ],
+}
+
+EDUCATION_LABELS = {
+    "Education1": "Illiterate/semi-literate",
+    "Education2": "Primary",
+    "Education3": "Middle",
+    "Education4": "High/vocational",
+    "Education5": "College or above",
+}
+
+ADL_LABELS = {
+    "ADL2": "Mild",
+    "ADL3": "Moderate",
+    "ADL4": "Complete",
+}
+
 def read_excel_safely(path):
-    """读取实际为 xlsx 格式的内置文件，避免按 UTF-8 解析。"""
+    """读取实际为 xlsx 格式的内置文件。"""
     return pd.read_excel(path, engine="openpyxl")
 
 def clean_dataframe(df):
@@ -46,10 +79,6 @@ def load_model():
             "cox_coefficients.xlsx must contain Variable and Coefficient columns."
         )
 
-    # 保留 Variable、Coefficient，并寻找 center_value 列
-    coef_df = coef_df.copy()
-    coef_df.columns = [str(col).strip() for col in coef_df.columns]
-
     variable_col = next(
         (
             col
@@ -58,6 +87,7 @@ def load_model():
         ),
         coef_df.columns[0],
     )
+
     coefficient_col = next(
         (
             col
@@ -66,6 +96,7 @@ def load_model():
         ),
         coef_df.columns[1],
     )
+
     center_col = next(
         (
             col
@@ -83,22 +114,26 @@ def load_model():
     )
 
     if center_col is None:
-        # 如果文件没有 center_value，默认中心值为 0
+        # 如果文件中没有 center_value，默认中心值为0
         coef_df["center_value"] = 0.0
     else:
         coef_df = coef_df.rename(columns={center_col: "center_value"})
 
     coef_df["Variable"] = coef_df["Variable"].astype(str).str.strip()
     coef_df["Coefficient"] = pd.to_numeric(
-        coef_df["Coefficient"], errors="coerce"
+        coef_df["Coefficient"],
+        errors="coerce",
     )
     coef_df["center_value"] = pd.to_numeric(
-        coef_df["center_value"], errors="coerce"
+        coef_df["center_value"],
+        errors="coerce",
     ).fillna(0.0)
 
     coef_df = coef_df.dropna(subset=["Variable", "Coefficient"])
     coef_df = coef_df.loc[
-        ~coef_df["Variable"].str.lower().isin({"center", "center_value"})
+        ~coef_df["Variable"].str.lower().isin(
+            {"center", "center_value"}
+        )
     ].copy()
 
     if range_df.shape[1] < 5:
@@ -115,6 +150,7 @@ def load_model():
         "var_name2",
         "start_value",
     ]
+
     range_df["Variable"] = range_df["Variable"].astype(str).str.strip()
     range_df["var_name2"] = range_df["var_name2"].fillna(
         range_df["Variable"]
@@ -123,14 +159,19 @@ def load_model():
     range_df["Low"] = pd.to_numeric(range_df["Low"], errors="coerce")
     range_df["High"] = pd.to_numeric(range_df["High"], errors="coerce")
     range_df["start_value"] = pd.to_numeric(
-        range_df["start_value"], errors="coerce"
+        range_df["start_value"],
+        errors="coerce",
     )
 
     numeric_cut_values = pd.to_numeric(
-        cut_df.stack(), errors="coerce"
+        cut_df.stack(),
+        errors="coerce",
     ).dropna()
+
     if numeric_cut_values.empty:
-        raise ValueError("risk_cut.xlsx does not contain a numeric threshold.")
+        raise ValueError(
+            "risk_cut.xlsx does not contain a numeric threshold."
+        )
 
     risk_cut = float(numeric_cut_values.iloc[0])
     return coef_df, range_df, risk_cut
@@ -141,6 +182,7 @@ def get_range_row(variable, range_df):
 
 def get_display_name(variable, range_df):
     row = get_range_row(variable, range_df)
+
     if row is not None and pd.notna(row["var_name2"]):
         name = str(row["var_name2"]).strip()
         if name:
@@ -178,8 +220,10 @@ def get_display_name(variable, range_df):
 
 def get_default_value(variable, range_df):
     row = get_range_row(variable, range_df)
+
     if row is None or pd.isna(row["start_value"]):
         return 0.0
+
     return float(row["start_value"])
 
 def get_user_inputs(coef_df, range_df):
@@ -206,25 +250,18 @@ def get_user_inputs(coef_df, range_df):
     with c3:
         education = st.selectbox(
             "Education",
-            [
-                "Illiterate/semi-literate",
-                "Primary",
-                "Middle",
-                "High/vocational",
-                "College or above",
-            ],
+            list(EDUCATION_LABELS.values()),
         )
-        for level in range(1, 6):
-            raw_values[f"Education{level}"] = 0
 
-        education_index = {
-            "Illiterate/semi-literate": 1,
-            "Primary": 2,
-            "Middle": 3,
-            "High/vocational": 4,
-            "College or above": 5,
-        }[education]
-        raw_values[f"Education{education_index}"] = 1
+        for variable in CATEGORICAL_GROUPS["Education"]:
+            raw_values[variable] = 0
+
+        education_variable = next(
+            variable
+            for variable, label in EDUCATION_LABELS.items()
+            if label == education
+        )
+        raw_values[education_variable] = 1
 
     with c4:
         marital = st.selectbox(
@@ -248,13 +285,21 @@ def get_user_inputs(coef_df, range_df):
             "ADL",
             ["Independent", "Mild", "Moderate", "Complete"],
         )
-        adl_levels = {
-            2: "Mild",
-            3: "Moderate",
-            4: "Complete",
-        }
-        for level in range(2, 5):
-            raw_values[f"ADL{level}"] = int(adl == adl_levels[level])
+
+        for variable in CATEGORICAL_GROUPS["ADL"]:
+            raw_values[variable] = 0
+
+        adl_variable = next(
+            (
+                variable
+                for variable, label in ADL_LABELS.items()
+                if label == adl
+            ),
+            None,
+        )
+
+        if adl_variable is not None:
+            raw_values[adl_variable] = 1
 
     with c3:
         srh = st.selectbox(
@@ -335,6 +380,7 @@ def get_user_inputs(coef_df, range_df):
     ]
 
     cols = st.columns(3)
+
     for index, variable in enumerate(ordered_vars):
         with cols[index % 3]:
             label = get_display_name(variable, range_df)
@@ -365,57 +411,131 @@ def get_user_inputs(coef_df, range_df):
 
 def calculate_score(raw_values, coef_df, range_df):
     """
-    计算规则：
-    - 体检和血液检测变量：超出 [Low, High] 区间时 indicator=1，否则为0；
-    - 二分类变量：直接使用0/1；
-    - 每个变量的线性项为 coefficient * (indicator - center_value)；
-    - 风险指标表仅显示对最终风险评分产生正向贡献的因素。
+    计算每个变量的贡献：
+
+        contribution = coefficient * model_value - center_value
+
+    规则：
+    - Age 使用原始连续值；
+    - Education 和 ADL 对所有哑变量贡献求和；
+    - 有 Low/High 的变量根据是否超出区间转换为0/1；
+    - 二分类变量和哑变量直接使用0/1；
+    - 结果表只显示贡献为正的因素。
     """
     score = 0.0
     details = []
+    processed_variables = set()
 
-    for entry in coef_df.itertuples(index=False):
-        variable = str(entry.Variable).strip()
-        coefficient = float(entry.Coefficient)
-        center_value = float(entry.center_value)
+    coefficient_map = coef_df.set_index("Variable")
+
+    def get_variable_contribution(variable):
+        if variable not in coefficient_map.index:
+            return 0.0, ""
+
+        coefficient = float(
+            coefficient_map.loc[variable, "Coefficient"]
+        )
+        center_value = float(
+            coefficient_map.loc[variable, "center_value"]
+        )
         raw_value = float(raw_values.get(variable, 0.0))
-
         range_row = get_range_row(variable, range_df)
 
-        if range_row is not None:
+        # Age 是连续变量，直接使用年龄原始值
+        if variable in CONTINUOUS_VARIABLES:
+            model_value = raw_value
+            condition = f"{raw_value:.0f} years"
+
+        # 有阈值的连续测量变量转换为风险指标
+        elif range_row is not None:
             low = range_row["Low"]
             high = range_row["High"]
 
-            # 有阈值的变量按是否超出区间转换为 risk indicator
             if pd.notna(low) and raw_value < float(low):
-                indicator = 1.0
+                model_value = 1.0
                 condition = f"< {float(low):.2f}"
             elif pd.notna(high) and raw_value > float(high):
-                indicator = 1.0
+                model_value = 1.0
                 condition = f"> {float(high):.2f}"
             else:
-                indicator = 0.0
+                model_value = 0.0
                 condition = "within threshold"
+
+        # 二分类变量和哑变量直接使用0/1
         else:
-            indicator = 1.0 if raw_value == 1 else 0.0
-            condition = (
-                "risk indicator = 1"
-                if indicator
-                else "risk indicator = 0"
-            )
+            model_value = 1.0 if raw_value == 1.0 else 0.0
+            condition = "present" if model_value == 1.0 else "absent"
 
-        centered_value = indicator - center_value
-        contribution = coefficient * centered_value
-        score += contribution
+        # 注意：这里不能写成 coefficient * (model_value - center_value)
+        contribution = coefficient * model_value - center_value
 
-        # 只显示使评分增加的因素
-        if contribution > 0:
+        return contribution, condition
+
+    # Education、ADL：分别累加全部哑变量的贡献
+    for group_name, variables in CATEGORICAL_GROUPS.items():
+        group_contribution = 0.0
+        selected_variable = None
+
+        for variable in variables:
+            if variable not in coefficient_map.index:
+                continue
+
+            contribution, _ = get_variable_contribution(variable)
+            group_contribution += contribution
+            processed_variables.add(variable)
+
+            if float(raw_values.get(variable, 0.0)) == 1.0:
+                selected_variable = variable
+
+        score += group_contribution
+
+        if group_name == "Education":
+            if selected_variable is None:
+                display_name = "Education: Reference group"
+            else:
+                display_name = (
+                    f"Education: {EDUCATION_LABELS[selected_variable]}"
+                )
+        else:
+            if selected_variable is None:
+                display_name = "ADL: Independent"
+            else:
+                display_name = f"ADL: {ADL_LABELS[selected_variable]}"
+
+        # 即使当前分类选择的是参考组，只要所有哑变量贡献之和为正，
+        # 仍然显示该分类变量的正向贡献。
+        if group_contribution > 0:
             details.append(
                 {
-                    "Contributing risk indicator": (
-                        f"{get_display_name(variable, range_df)} "
-                        f"({condition})"
-                    ),
+                    "Contributing risk indicator": display_name,
+                    "Contribution": group_contribution,
+                }
+            )
+
+    # 计算其余模型变量
+    for entry in coef_df.itertuples(index=False):
+        variable = str(entry.Variable).strip()
+
+        if variable in processed_variables:
+            continue
+
+        contribution, condition = get_variable_contribution(variable)
+        score += contribution
+
+        if contribution > 0:
+            display_name = get_display_name(variable, range_df)
+
+            # 二分类变量不再附加 risk indicator = 1/0 文案
+            if variable in CONTINUOUS_VARIABLES:
+                indicator_name = f"{display_name} ({condition})"
+            elif condition in {"present", "absent"}:
+                indicator_name = display_name
+            else:
+                indicator_name = f"{display_name} ({condition})"
+
+            details.append(
+                {
+                    "Contributing risk indicator": indicator_name,
                     "Contribution": contribution,
                 }
             )
@@ -427,6 +547,7 @@ def calculate_score(raw_values, coef_df, range_df):
             by="Contribution",
             ascending=False,
         ).reset_index(drop=True)
+
         details_df["Contribution"] = details_df["Contribution"].map(
             lambda value: f"+{value:.4f}"
         )
@@ -486,7 +607,6 @@ def render_result_cards(score, threshold):
 
 def main():
     st.title("Cardiometabolic Multimorbidity Risk Prediction")
-    st.caption("Cox model-based individual risk score calculator")
 
     try:
         coef_df, range_df, risk_cut = load_model()
@@ -525,9 +645,8 @@ def main():
 
     st.divider()
     st.caption(
-        "Reference only: The calculated risk score and risk category are for "
-        "reference only and should not be used as the sole basis for clinical "
-        "decision-making."
+        "The calculated risk score and risk category are for reference only "
+        "and should not be used as the basis for clinical decision-making."
     )
 
 if __name__ == "__main__":
