@@ -51,7 +51,11 @@ def load_model():
     coef_df.columns = [str(col).strip() for col in coef_df.columns]
 
     variable_col = next(
-        (col for col in coef_df.columns if col.lower() in {"variable", "var_name"}),
+        (
+            col
+            for col in coef_df.columns
+            if col.lower() in {"variable", "var_name"}
+        ),
         coef_df.columns[0],
     )
     coefficient_col = next(
@@ -104,9 +108,17 @@ def load_model():
         )
 
     range_df = range_df.iloc[:, :5].copy()
-    range_df.columns = ["Variable", "Low", "High", "var_name2", "start_value"]
+    range_df.columns = [
+        "Variable",
+        "Low",
+        "High",
+        "var_name2",
+        "start_value",
+    ]
     range_df["Variable"] = range_df["Variable"].astype(str).str.strip()
-    range_df["var_name2"] = range_df["var_name2"].fillna(range_df["Variable"])
+    range_df["var_name2"] = range_df["var_name2"].fillna(
+        range_df["Variable"]
+    )
     range_df["var_name2"] = range_df["var_name2"].astype(str).str.strip()
     range_df["Low"] = pd.to_numeric(range_df["Low"], errors="coerce")
     range_df["High"] = pd.to_numeric(range_df["High"], errors="coerce")
@@ -114,7 +126,9 @@ def load_model():
         range_df["start_value"], errors="coerce"
     )
 
-    numeric_cut_values = pd.to_numeric(cut_df.stack(), errors="coerce").dropna()
+    numeric_cut_values = pd.to_numeric(
+        cut_df.stack(), errors="coerce"
+    ).dropna()
     if numeric_cut_values.empty:
         raise ValueError("risk_cut.xlsx does not contain a numeric threshold.")
 
@@ -142,7 +156,7 @@ def get_display_name(variable, range_df):
         "SP": "Systolic blood pressure",
         "DP": "Diastolic blood pressure",
         "hb": "Haemoglobin",
-        "wbc": "White blood cell count",
+        "wbc": "White blood cell count (10⁹/L)",
         "plt": "Platelet count",
         "fbg": "Fasting blood glucose",
         "scr": "Serum creatinine",
@@ -202,6 +216,7 @@ def get_user_inputs(coef_df, range_df):
         )
         for level in range(1, 6):
             raw_values[f"Education{level}"] = 0
+
         education_index = {
             "Illiterate/semi-literate": 1,
             "Primary": 2,
@@ -212,7 +227,10 @@ def get_user_inputs(coef_df, range_df):
         raw_values[f"Education{education_index}"] = 1
 
     with c4:
-        marital = st.selectbox("Marital status", ["Partnered", "Unpartnered"])
+        marital = st.selectbox(
+            "Marital status",
+            ["Partnered", "Unpartnered"],
+        )
         raw_values["marital_status"] = int(marital == "Unpartnered")
 
     st.subheader("Health behaviors and functional status")
@@ -226,16 +244,28 @@ def get_user_inputs(coef_df, range_df):
         raw_values["smoking_status3"] = int(smoking == "Current smoker")
 
     with c2:
-        adl = st.selectbox("ADL", ["Independent", "Mild", "Moderate", "Complete"])
+        adl = st.selectbox(
+            "ADL",
+            ["Independent", "Mild", "Moderate", "Complete"],
+        )
+        adl_levels = {
+            2: "Mild",
+            3: "Moderate",
+            4: "Complete",
+        }
         for level in range(2, 5):
-            raw_values[f"ADL{level}"] = int(adl == {2: "Mild", 3: "Moderate", 4: "Complete"}[level])
+            raw_values[f"ADL{level}"] = int(adl == adl_levels[level])
 
     with c3:
-        srh = st.selectbox("Self-rated health", ["Optimal", "Suboptimal"])
+        srh = st.selectbox(
+            "Self-rated health",
+            ["Optimal", "Suboptimal"],
+        )
         raw_values["SRH"] = int(srh == "Suboptimal")
 
     st.subheader("Cardiometabolic conditions")
     c1, c2, c3, c4 = st.columns(4)
+
     with c1:
         hypertension = st.selectbox("Hypertension", ["No", "Yes"])
     with c2:
@@ -253,33 +283,63 @@ def get_user_inputs(coef_df, range_df):
             heart == "Yes",
         ]
     )
-    # 2 个共病为 0，超过 2 个共病为 1；其他情况也按二分类变量处理
-    raw_values["CMM_counts2"] = int(condition_count > 2)
+
+    # 模型编码：恰好2个共病为0，≥3个共病为1
+    raw_values["CMM_counts2"] = int(condition_count >= 3)
 
     st.subheader("Physical examination")
     c1, c2, c3 = st.columns(3)
+
     with c1:
         height = st.number_input(
-            "Height (cm)", 50.0, 250.0, 165.0, step=0.01, format="%.2f"
+            "Height (cm)",
+            min_value=50.0,
+            max_value=250.0,
+            value=165.0,
+            step=0.01,
+            format="%.2f",
         )
+
     with c2:
         weight = st.number_input(
-            "Weight (kg)", 20.0, 250.0, 65.0, step=0.01, format="%.2f"
+            "Weight (kg)",
+            min_value=20.0,
+            max_value=250.0,
+            value=65.0,
+            step=0.01,
+            format="%.2f",
         )
+
     raw_values["BMI"] = float(weight / ((height / 100.0) ** 2))
+
     with c3:
-        st.metric("Calculated BMI (kg/m²)", f"{raw_values['BMI']:.2f}")
+        st.metric(
+            "Calculated BMI (kg/m²)",
+            f"{raw_values['BMI']:.2f}",
+        )
 
     st.subheader("Clinical and laboratory measurements")
     ordered_vars = [
-        "SP", "DP", "hb", "wbc", "plt", "fbg",
-        "scr", "tc", "tg", "ldl", "hdl", "bun",
+        "SP",
+        "DP",
+        "hb",
+        "wbc",
+        "plt",
+        "fbg",
+        "scr",
+        "tc",
+        "tg",
+        "ldl",
+        "hdl",
+        "bun",
     ]
+
     cols = st.columns(3)
     for index, variable in enumerate(ordered_vars):
         with cols[index % 3]:
             label = get_display_name(variable, range_df)
             default = get_default_value(variable, range_df)
+
             if variable in {"SP", "DP"}:
                 raw_values[variable] = float(
                     st.number_input(
@@ -306,10 +366,10 @@ def get_user_inputs(coef_df, range_df):
 def calculate_score(raw_values, coef_df, range_df):
     """
     计算规则：
-    - 体检和血检变量：超出 [Low, High] 区间时 indicator=1，否则为 0；
-    - 二分类变量：直接使用 0/1；
+    - 体检和血液检测变量：超出 [Low, High] 区间时 indicator=1，否则为0；
+    - 二分类变量：直接使用0/1；
     - 每个变量的线性项为 coefficient * (indicator - center_value)；
-    - ADL/Education 作为哑变量，分别使用所选等级对应的 indicator。
+    - 风险指标表仅显示对最终风险评分产生正向贡献的因素。
     """
     score = 0.0
     details = []
@@ -321,6 +381,7 @@ def calculate_score(raw_values, coef_df, range_df):
         raw_value = float(raw_values.get(variable, 0.0))
 
         range_row = get_range_row(variable, range_df)
+
         if range_row is not None:
             low = range_row["Low"]
             high = range_row["High"]
@@ -337,56 +398,91 @@ def calculate_score(raw_values, coef_df, range_df):
                 condition = "within threshold"
         else:
             indicator = 1.0 if raw_value == 1 else 0.0
-            condition = "risk indicator = 1" if indicator else "risk indicator = 0"
+            condition = (
+                "risk indicator = 1"
+                if indicator
+                else "risk indicator = 0"
+            )
 
         centered_value = indicator - center_value
         contribution = coefficient * centered_value
         score += contribution
 
-        if indicator == 1.0 or centered_value != 0.0:
+        # 只显示使评分增加的因素
+        if contribution > 0:
             details.append(
                 {
-                    "Contributing indicator": (
-                        f"{get_display_name(variable, range_df)} ({condition})"
+                    "Contributing risk indicator": (
+                        f"{get_display_name(variable, range_df)} "
+                        f"({condition})"
                     ),
-                    "Indicator": indicator,
-                    "Center value": center_value,
                     "Contribution": contribution,
                 }
             )
 
     details_df = pd.DataFrame(details)
+
     if not details_df.empty:
         details_df = details_df.sort_values(
             by="Contribution",
-            key=lambda values: values.abs(),
             ascending=False,
         ).reset_index(drop=True)
-        details_df["Indicator"] = details_df["Indicator"].map(lambda value: f"{value:.0f}")
-        details_df["Center value"] = details_df["Center value"].map(lambda value: f"{value:.4f}")
-        details_df["Contribution"] = details_df["Contribution"].map(lambda value: f"{value:+.4f}")
+        details_df["Contribution"] = details_df["Contribution"].map(
+            lambda value: f"+{value:.4f}"
+        )
 
     return score, details_df
 
 def render_result_cards(score, threshold):
     high_risk = score >= threshold
     risk_label = "High risk" if high_risk else "Low risk"
-    score_color = "#B91C1C" if high_risk else "#1D4ED8"
-    background = "#FEF2F2" if high_risk else "#EFF6FF"
-    border = "#EF4444" if high_risk else "#3B82F6"
+
+    if high_risk:
+        color = "#B91C1C"
+        background = "#FEF2F2"
+        border = "#EF4444"
+    else:
+        color = "#1D4ED8"
+        background = "#EFF6FF"
+        border = "#3B82F6"
 
     col1, col2 = st.columns(2)
-    with col1:
-        st.metric("Risk score", f"{score:.4f}")
-    with col2:
-        st.metric("Risk cut-off", f"{threshold:.4f}")
 
-    st.markdown(
-        f"<div style='background:{background}; border:1px solid {border}; "
-        f"border-radius:8px; padding:16px; color:{score_color}; "
-        f"font-size:24px; font-weight:700; text-align:center'>{risk_label}</div>",
-        unsafe_allow_html=True,
-    )
+    with col1:
+        st.markdown(
+            f"""
+            <div style="background:#F8FAFC; border:1px solid #CBD5E1;
+                        border-radius:8px; padding:16px;
+                        text-align:center; min-height:112px;">
+                <div style="font-size:16px; color:#475569;">
+                    Risk score
+                </div>
+                <div style="font-size:30px; font-weight:700;
+                            color:#0F172A; margin-top:6px;">
+                    {score:.4f}
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    with col2:
+        st.markdown(
+            f"""
+            <div style="background:{background}; border:1px solid {border};
+                        border-radius:8px; padding:16px;
+                        text-align:center; min-height:112px;">
+                <div style="font-size:16px; color:{color};">
+                    Risk category
+                </div>
+                <div style="font-size:30px; font-weight:700;
+                            color:{color}; margin-top:6px;">
+                    {risk_label}
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
 def main():
     st.title("Cardiometabolic Multimorbidity Risk Prediction")
@@ -401,7 +497,11 @@ def main():
     user_inputs = get_user_inputs(coef_df, range_df)
     st.divider()
 
-    if st.button("Calculate risk", type="primary", use_container_width=True):
+    if st.button(
+        "Calculate risk",
+        type="primary",
+        use_container_width=True,
+    ):
         final_score, detail_df = calculate_score(
             user_inputs,
             coef_df,
@@ -411,23 +511,23 @@ def main():
         st.subheader("Prediction result")
         render_result_cards(final_score, risk_cut)
 
-        st.caption(
-            "Reference only: The calculated risk score and risk classification "
-            "are for research and educational purposes only and do not replace "
-            "professional clinical assessment, diagnosis, or medical advice."
-        )
-
         st.divider()
         st.subheader("Contributing risk indicators")
+
         if detail_df.empty:
-            st.info("No model-defined contributing indicators were identified.")
+            st.info("No risk-increasing indicators were identified.")
         else:
-            st.dataframe(detail_df, use_container_width=True, hide_index=True)
+            st.dataframe(
+                detail_df,
+                use_container_width=True,
+                hide_index=True,
+            )
 
     st.divider()
     st.caption(
-        "Reference only: This calculator is intended for research and educational "
-        "use only and must not be used as the sole basis for clinical decision-making."
+        "Reference only: The calculated risk score and risk category are for "
+        "reference only and should not be used as the sole basis for clinical "
+        "decision-making."
     )
 
 if __name__ == "__main__":
