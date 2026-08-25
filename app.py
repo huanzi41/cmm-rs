@@ -576,9 +576,7 @@ def render_result_cards(score, threshold):
         f"low risk (≤{DISPLAY_RISK_CUTOFF:.2f}) and "
         f"high risk (>{DISPLAY_RISK_CUTOFF:.2f}). "
         "The value 1.11 represents the 90th percentile of the risk score "
-        "among older adults with cardiometabolic multimorbidity in Shenzhen. "
-        "The actual classification uses the full-precision cutoff from "
-        "risk_cut.csv."
+        "among older adults with cardiometabolic multimorbidity in Shenzhen."
     )
 
 def main():
