@@ -1,10 +1,11 @@
 from pathlib import Path
 
 import pandas as pd
+import plotly.graph_objects as go
 import streamlit as st
 
 st.set_page_config(
-    page_title="Cardiometabolic Multimorbidity Risk Prediction",
+    page_title="Cardiometabolic Multimorbidity Risk Prediction and Stratification",
     page_icon="❤️",
     layout="wide",
 )
@@ -84,6 +85,16 @@ MEASUREMENT_VARIABLES = {
     "hdl",
     "bun",
 }
+
+def clean_dataframe(df):
+    df = df.copy()
+    df.columns = [str(col).strip() for col in df.columns]
+
+    for col in df.columns:
+        if df[col].dtype == object:
+            df[col] = df[col].astype(str).str.strip()
+
+    return df
 
 @st.cache_data
 def load_model():
@@ -177,16 +188,6 @@ def load_model():
         raise ValueError("No valid risk cutoff was found in risk_cut.csv.")
 
     return coef_df, range_df, float(cut_values.iloc[0])
-
-def clean_dataframe(df):
-    df = df.copy()
-    df.columns = [str(col).strip() for col in df.columns]
-
-    for col in df.columns:
-        if df[col].dtype == object:
-            df[col] = df[col].astype(str).str.strip()
-
-    return df
 
 def get_range_row(variable, range_df):
     rows = range_df.loc[range_df["Variable"].eq(variable)]
@@ -477,7 +478,7 @@ def calculate_score(raw, coef_df, range_df):
         if variable == "Age":
             name = f"Age: {raw.get('Age', 0):.0f} years"
         elif variable == "CMM_counts2":
-            name = "Multimorbidity count ≥ 3"
+            name = "Multimorbidity count >= 3"
         elif variable == "smoking_status3":
             name = (
                 "Smoking status: "
@@ -514,9 +515,6 @@ def calculate_score(raw, coef_df, range_df):
             "Contribution",
             ascending=False,
         ).reset_index(drop=True)
-        details_df["Contribution"] = details_df["Contribution"].map(
-            lambda value: f"+{value:.4f}"
-        )
 
     return score, details_df
 
@@ -573,10 +571,75 @@ def render_result_cards(score, threshold):
 
     st.caption(
         "Risk assessment is classified into two categories: "
-        f"low risk (≤{DISPLAY_RISK_CUTOFF:.2f}) and "
+        f"low risk (<={DISPLAY_RISK_CUTOFF:.2f}) and "
         f"high risk (>{DISPLAY_RISK_CUTOFF:.2f}). "
         "The value 1.11 represents the 90th percentile of the risk score "
         "among older adults with cardiometabolic multimorbidity in Shenzhen."
+    )
+
+def render_contribution_chart(detail_df):
+    plot_df = detail_df.sort_values(
+        "Contribution",
+        ascending=False,
+    ).copy()
+
+    bar_colors = [
+        "#DC2626" if contribution > 0 else "#2563EB"
+        for contribution in plot_df["Contribution"]
+    ]
+
+    labels = [
+        f"+{contribution:.4f}"
+        if contribution >= 0
+        else f"{contribution:.4f}"
+        for contribution in plot_df["Contribution"]
+    ]
+
+    figure_height = max(380, min(560, 280 + len(plot_df) * 12))
+
+    fig = go.Figure(
+        go.Bar(
+            x=plot_df["Risk indicator"],
+            y=plot_df["Contribution"],
+            marker_color=bar_colors,
+            text=labels,
+            textposition="outside",
+            cliponaxis=False,
+            hovertemplate=(
+                "<b>%{x}</b><br>"
+                "Contribution: %{y:.4f}"
+                "<extra></extra>"
+            ),
+        )
+    )
+
+    fig.update_layout(
+        height=figure_height,
+        margin=dict(l=20, r=20, t=25, b=150),
+        paper_bgcolor="#FFFFFF",
+        plot_bgcolor="#FFFFFF",
+        showlegend=False,
+        font=dict(color="#0F172A"),
+        xaxis=dict(
+            title="Risk indicator",
+            tickangle=-35,
+            showgrid=False,
+            linecolor="#94A3B8",
+            tickfont=dict(size=12),
+        ),
+        yaxis=dict(
+            title="Contribution to risk score",
+            zeroline=True,
+            zerolinecolor="#94A3B8",
+            gridcolor="#E2E8F0",
+            linecolor="#94A3B8",
+        ),
+    )
+
+    st.plotly_chart(
+        fig,
+        use_container_width=True,
+        config={"displayModeBar": False},
     )
 
 def main():
@@ -602,8 +665,17 @@ def main():
         if detail_df.empty:
             st.info("No risk-increasing indicators were identified.")
         else:
+            render_contribution_chart(detail_df)
+
+            display_df = detail_df.copy()
+            display_df["Contribution"] = display_df["Contribution"].map(
+                lambda value: f"+{value:.4f}"
+                if value >= 0
+                else f"{value:.4f}"
+            )
+
             st.dataframe(
-                detail_df,
+                display_df,
                 use_container_width=True,
                 hide_index=True,
             )
