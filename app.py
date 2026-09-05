@@ -26,7 +26,11 @@ CATEGORICAL_GROUPS = {
         "Education4",
         "Education5",
     ],
-    "ADL": ["ADL2", "ADL3", "ADL4"],
+    "ADL": [
+        "ADL2",
+        "ADL3",
+        "ADL4",
+    ],
 }
 
 EDUCATION_OPTIONS = {
@@ -63,13 +67,16 @@ VARIABLE_LABELS = {
     "tc": "Total cholesterol",
     "tg": "Triglycerides",
     "ldl": "LDL cholesterol",
-    "ldl-c": "LDL cholesterol",
+    "ldl-c": "LDL-C",
     "hdl": "HDL cholesterol",
     "bun": "Blood urea nitrogen",
     "smoking_status3": "Smoking status",
 }
 
-PHYSICAL_VARIABLES = {"BMI", "SP"}
+PHYSICAL_VARIABLES = {
+    "BMI",
+    "SP",
+}
 
 MEASUREMENT_VARIABLES = {
     "DP",
@@ -86,6 +93,24 @@ MEASUREMENT_VARIABLES = {
     "bun",
 }
 
+# Laboratory input display order.
+# Variables that exist in the coefficient file will be displayed
+# in this order. Any other laboratory variables will be appended afterward.
+LABORATORY_DISPLAY_ORDER = [
+    "hb",
+    "fbg",
+    "scr",
+    "bun",
+    "wbc",
+    "plt",
+    "ldl-c",
+    "hdl",
+    "DP",
+    "tc",
+    "tg",
+    "ldl",
+]
+
 def clean_dataframe(df):
     df = df.copy()
     df.columns = [str(col).strip() for col in df.columns]
@@ -98,9 +123,15 @@ def clean_dataframe(df):
 
 @st.cache_data
 def load_model():
-    coef_df = clean_dataframe(pd.read_excel(COEF_FILE, engine="openpyxl"))
-    range_df = clean_dataframe(pd.read_excel(RANGE_FILE, engine="openpyxl"))
-    cut_df = clean_dataframe(pd.read_excel(CUT_FILE, engine="openpyxl"))
+    coef_df = clean_dataframe(
+        pd.read_excel(COEF_FILE, engine="openpyxl")
+    )
+    range_df = clean_dataframe(
+        pd.read_excel(RANGE_FILE, engine="openpyxl")
+    )
+    cut_df = clean_dataframe(
+        pd.read_excel(CUT_FILE, engine="openpyxl")
+    )
 
     variable_col = next(
         (
@@ -124,7 +155,11 @@ def load_model():
         (
             col
             for col in coef_df.columns
-            if col.lower() in {"center_value", "center", "mean"}
+            if col.lower() in {
+                "center_value",
+                "center",
+                "mean",
+            }
         ),
         None,
     )
@@ -139,26 +174,46 @@ def load_model():
     if center_col is None:
         coef_df["center_value"] = 0.0
     else:
-        coef_df = coef_df.rename(columns={center_col: "center_value"})
+        coef_df = coef_df.rename(
+            columns={
+                center_col: "center_value",
+            }
+        )
 
-    coef_df["Variable"] = coef_df["Variable"].astype(str).str.strip()
+    coef_df["Variable"] = (
+        coef_df["Variable"]
+        .astype(str)
+        .str.strip()
+    )
+
     coef_df["Coefficient"] = pd.to_numeric(
         coef_df["Coefficient"],
         errors="coerce",
     )
+
     coef_df["center_value"] = pd.to_numeric(
         coef_df["center_value"],
         errors="coerce",
     ).fillna(0.0)
 
-    coef_df = coef_df.dropna(subset=["Variable", "Coefficient"])
+    coef_df = coef_df.dropna(
+        subset=[
+            "Variable",
+            "Coefficient",
+        ]
+    )
+
     coef_df = coef_df.loc[
         ~coef_df["Variable"].str.lower().isin(
-            {"center", "center_value"}
+            {
+                "center",
+                "center_value",
+            }
         )
     ].copy()
 
     range_df = range_df.iloc[:, :5].copy()
+
     range_df.columns = [
         "Variable",
         "Low",
@@ -167,13 +222,32 @@ def load_model():
         "start_value",
     ]
 
-    range_df["Variable"] = range_df["Variable"].astype(str).str.strip()
+    range_df["Variable"] = (
+        range_df["Variable"]
+        .astype(str)
+        .str.strip()
+    )
+
     range_df["var_name2"] = range_df["var_name2"].fillna(
         range_df["Variable"]
     )
-    range_df["var_name2"] = range_df["var_name2"].astype(str).str.strip()
-    range_df["Low"] = pd.to_numeric(range_df["Low"], errors="coerce")
-    range_df["High"] = pd.to_numeric(range_df["High"], errors="coerce")
+
+    range_df["var_name2"] = (
+        range_df["var_name2"]
+        .astype(str)
+        .str.strip()
+    )
+
+    range_df["Low"] = pd.to_numeric(
+        range_df["Low"],
+        errors="coerce",
+    )
+
+    range_df["High"] = pd.to_numeric(
+        range_df["High"],
+        errors="coerce",
+    )
+
     range_df["start_value"] = pd.to_numeric(
         range_df["start_value"],
         errors="coerce",
@@ -185,29 +259,55 @@ def load_model():
     ).dropna()
 
     if cut_values.empty:
-        raise ValueError("No valid risk cutoff was found in risk_cut.csv.")
+        raise ValueError(
+            "No valid risk cutoff was found in risk_cut.csv."
+        )
 
-    return coef_df, range_df, float(cut_values.iloc[0])
+    return (
+        coef_df,
+        range_df,
+        float(cut_values.iloc[0]),
+    )
 
 def get_range_row(variable, range_df):
-    rows = range_df.loc[range_df["Variable"].eq(variable)]
-    return None if rows.empty else rows.iloc[0]
+    rows = range_df.loc[
+        range_df["Variable"].eq(variable)
+    ]
+
+    if rows.empty:
+        return None
+
+    return rows.iloc[0]
 
 def get_model_variables(coef_df):
-    return set(coef_df["Variable"].astype(str).str.strip())
+    return set(
+        coef_df["Variable"]
+        .astype(str)
+        .str.strip()
+    )
 
 def get_display_name(variable, range_df):
-    row = get_range_row(variable, range_df)
+    row = get_range_row(
+        variable,
+        range_df,
+    )
 
     if row is not None and pd.notna(row["var_name2"]):
         name = str(row["var_name2"]).strip()
+
         if name and name.lower() != "nan":
             return name
 
-    return VARIABLE_LABELS.get(variable, variable)
+    return VARIABLE_LABELS.get(
+        variable,
+        variable,
+    )
 
 def get_default_value(variable, range_df):
-    row = get_range_row(variable, range_df)
+    row = get_range_row(
+        variable,
+        range_df,
+    )
 
     if row is None or pd.isna(row["start_value"]):
         return 0.0
@@ -218,7 +318,9 @@ def get_user_inputs(coef_df, range_df):
     raw = {}
     model_vars = get_model_variables(coef_df)
 
-    st.markdown("# ❤️ Cardiometabolic Multimorbidity Risk Prediction")
+    st.markdown(
+        "# ❤️ Cardiometabolic Multimorbidity Risk Prediction"
+    )
 
     st.subheader("Demographic characteristics")
     demo = st.columns(4)
@@ -238,8 +340,19 @@ def get_user_inputs(coef_df, range_df):
             raw["Age"] = 70.0
 
     with demo[1]:
-        sex = st.selectbox("Sex", ["Female", "Male"])
-        raw["Sex"] = int(sex == "Male") if "Sex" in model_vars else 0
+        sex = st.selectbox(
+            "Sex",
+            [
+                "Female",
+                "Male",
+            ],
+        )
+
+        raw["Sex"] = (
+            int(sex == "Male")
+            if "Sex" in model_vars
+            else 0
+        )
 
     with demo[2]:
         education = st.selectbox(
@@ -251,6 +364,7 @@ def get_user_inputs(coef_df, range_df):
             raw[variable] = 0
 
         selected = EDUCATION_OPTIONS[education]
+
         if selected in model_vars:
             raw[selected] = 1
 
@@ -259,37 +373,55 @@ def get_user_inputs(coef_df, range_df):
     with demo[3]:
         marital = st.selectbox(
             "Marital status",
-            ["Partnered", "Unpartnered"],
+            [
+                "Partnered",
+                "Unpartnered",
+            ],
         )
+
         raw["marital_status"] = (
             int(marital == "Unpartnered")
             if "marital_status" in model_vars
             else 0
         )
+
         raw["_marital_label"] = marital
 
-    st.subheader("Health behaviors and functional status")
+    st.subheader(
+        "Health behaviors and functional status"
+    )
+
     health = st.columns(3)
 
     with health[0]:
         smoking = st.selectbox(
             "Smoking status",
-            ["Never-smoker", "Ex-smoker", "Current smoker"],
+            [
+                "Never-smoker",
+                "Ex-smoker",
+                "Current smoker",
+            ],
         )
+
         raw["smoking_status3"] = (
             int(smoking == "Current smoker")
             if "smoking_status3" in model_vars
             else 0
         )
+
         raw["_smoking_label"] = smoking
 
     with health[1]:
-        adl = st.selectbox("ADL", list(ADL_OPTIONS))
+        adl = st.selectbox(
+            "ADL",
+            list(ADL_OPTIONS),
+        )
 
         for variable in CATEGORICAL_GROUPS["ADL"]:
             raw[variable] = 0
 
         selected = ADL_OPTIONS[adl]
+
         if selected in model_vars:
             raw[selected] = 1
 
@@ -298,29 +430,57 @@ def get_user_inputs(coef_df, range_df):
     with health[2]:
         srh = st.selectbox(
             "Self-rated health",
-            ["Optimal", "Suboptimal"],
+            [
+                "Optimal",
+                "Suboptimal",
+            ],
         )
-        raw["SRH"] = int(srh == "Suboptimal") if "SRH" in model_vars else 0
+
+        raw["SRH"] = (
+            int(srh == "Suboptimal")
+            if "SRH" in model_vars
+            else 0
+        )
+
         raw["_srh_label"] = srh
 
     st.subheader("Cardiometabolic conditions")
+
     conditions = st.columns(5)
-    labels = ["Hypertension", "Diabetes", "Stroke", "Heart disease"]
+
+    labels = [
+        "Hypertension",
+        "Diabetes",
+        "Stroke",
+        "Heart disease",
+    ]
+
     selected_conditions = []
 
     for index, label in enumerate(labels):
         with conditions[index]:
             value = st.selectbox(
                 label,
-                ["No", "Yes"],
+                [
+                    "No",
+                    "Yes",
+                ],
                 key=f"condition_{index}",
             )
-            selected_conditions.append(value == "Yes")
 
-    condition_count = int(sum(selected_conditions))
+            selected_conditions.append(
+                value == "Yes"
+            )
+
+    condition_count = int(
+        sum(selected_conditions)
+    )
 
     with conditions[4]:
-        st.metric("Multimorbidity count", condition_count)
+        st.metric(
+            "Multimorbidity count",
+            condition_count,
+        )
 
     if condition_count < 2:
         st.error(
@@ -328,10 +488,14 @@ def get_user_inputs(coef_df, range_df):
             "Please select at least two cardiometabolic conditions."
         )
 
-    raw["CMM_counts2"] = int(condition_count >= 3)
+    raw["CMM_counts2"] = int(
+        condition_count >= 3
+    )
+
     raw["_condition_count"] = condition_count
 
     st.subheader("Physical examination")
+
     physical = st.columns(4)
 
     with physical[0]:
@@ -354,44 +518,86 @@ def get_user_inputs(coef_df, range_df):
             format="%.2f",
         )
 
-    bmi = float(weight / ((height / 100.0) ** 2))
+    bmi = float(
+        weight / ((height / 100.0) ** 2)
+    )
 
     if "BMI" in model_vars:
         raw["BMI"] = bmi
 
     with physical[2]:
-        st.metric("BMI", f"{bmi:.2f}")
+        st.metric(
+            "BMI",
+            f"{bmi:.2f}",
+        )
 
     if "SP" in model_vars:
         with physical[3]:
             raw["SP"] = float(
                 st.number_input(
-                    get_display_name("SP", range_df),
+                    get_display_name(
+                        "SP",
+                        range_df,
+                    ),
                     min_value=0,
                     max_value=300,
-                    value=int(round(get_default_value("SP", range_df))),
+                    value=int(
+                        round(
+                            get_default_value(
+                                "SP",
+                                range_df,
+                            )
+                        )
+                    ),
                     step=1,
                 )
             )
 
+    # Arrange laboratory variables in the requested order.
     laboratory_vars = [
+        variable
+        for variable in LABORATORY_DISPLAY_ORDER
+        if variable in model_vars
+        and variable in MEASUREMENT_VARIABLES
+        and variable not in PHYSICAL_VARIABLES
+    ]
+
+    # Preserve any additional laboratory variables that may exist
+    # in the coefficient file.
+    remaining_laboratory_vars = [
         variable
         for variable in coef_df["Variable"]
         if variable in MEASUREMENT_VARIABLES
         and variable not in PHYSICAL_VARIABLES
+        and variable not in laboratory_vars
     ]
+
+    laboratory_vars.extend(
+        remaining_laboratory_vars
+    )
 
     if laboratory_vars:
         st.subheader("Laboratory measurements")
-        lab_columns = st.columns(len(laboratory_vars))
 
-        for index, variable in enumerate(laboratory_vars):
+        lab_columns = st.columns(
+            len(laboratory_vars)
+        )
+
+        for index, variable in enumerate(
+            laboratory_vars
+        ):
             with lab_columns[index]:
                 raw[variable] = float(
                     st.number_input(
-                        get_display_name(variable, range_df),
+                        get_display_name(
+                            variable,
+                            range_df,
+                        ),
                         min_value=0.0,
-                        value=get_default_value(variable, range_df),
+                        value=get_default_value(
+                            variable,
+                            range_df,
+                        ),
                         step=0.01,
                         format="%.2f",
                     )
@@ -403,38 +609,82 @@ def calculate_score(raw, coef_df, range_df):
     score = 0.0
     details = []
     processed = set()
-    coefficient_map = coef_df.set_index("Variable")
+
+    coefficient_map = coef_df.set_index(
+        "Variable"
+    )
 
     def contribution_for(variable):
         if variable not in coefficient_map.index:
             return 0.0, ""
 
-        coefficient = float(coefficient_map.loc[variable, "Coefficient"])
-        center = float(coefficient_map.loc[variable, "center_value"])
-        value = float(raw.get(variable, 0.0))
-        range_row = get_range_row(variable, range_df)
+        coefficient = float(
+            coefficient_map.loc[
+                variable,
+                "Coefficient",
+            ]
+        )
+
+        center = float(
+            coefficient_map.loc[
+                variable,
+                "center_value",
+            ]
+        )
+
+        value = float(
+            raw.get(
+                variable,
+                0.0,
+            )
+        )
+
+        range_row = get_range_row(
+            variable,
+            range_df,
+        )
 
         if variable in CONTINUOUS_VARIABLES:
             model_value = value
             condition = f"{value:.0f} years"
+
         elif range_row is not None:
             low = range_row["Low"]
             high = range_row["High"]
 
             if pd.notna(low) and value < float(low):
                 model_value = 1.0
-                condition = f"{value:.2f} (< {float(low):.2f})"
+                condition = (
+                    f"{value:.2f} "
+                    f"(< {float(low):.2f})"
+                )
+
             elif pd.notna(high) and value > float(high):
                 model_value = 1.0
-                condition = f"{value:.2f} (> {float(high):.2f})"
+                condition = (
+                    f"{value:.2f} "
+                    f"(> {float(high):.2f})"
+                )
+
             else:
                 model_value = 0.0
                 condition = ""
-        else:
-            model_value = float(value == 1.0)
-            condition = "present" if model_value else "absent"
 
-        return coefficient * model_value - center, condition
+        else:
+            model_value = float(
+                value == 1.0
+            )
+
+            condition = (
+                "present"
+                if model_value
+                else "absent"
+            )
+
+        return (
+            coefficient * model_value - center,
+            condition,
+        )
 
     for group_name, variables in CATEGORICAL_GROUPS.items():
         included = [
@@ -449,19 +699,30 @@ def calculate_score(raw, coef_df, range_df):
         group_score = 0.0
 
         for variable in included:
-            contribution, _ = contribution_for(variable)
+            contribution, _ = contribution_for(
+                variable
+            )
+
             group_score += contribution
             processed.add(variable)
 
         score += group_score
 
         if group_score > 0:
-            label_key = f"_{group_name.lower()}_label"
-            label = raw.get(label_key, "Unknown")
+            label_key = (
+                f"_{group_name.lower()}_label"
+            )
+
+            label = raw.get(
+                label_key,
+                "Unknown",
+            )
 
             details.append(
                 {
-                    "Risk indicator": f"{group_name}: {label}",
+                    "Risk indicator": (
+                        f"{group_name}: {label}"
+                    ),
                     "Contribution": group_score,
                 }
             )
@@ -470,37 +731,59 @@ def calculate_score(raw, coef_df, range_df):
         if variable in processed:
             continue
 
-        contribution, condition = contribution_for(variable)
+        contribution, condition = contribution_for(
+            variable
+        )
+
         score += contribution
 
         if contribution <= 0:
             continue
 
         if variable == "Age":
-            name = f"Age: {raw.get('Age', 0):.0f} years"
+            name = (
+                f"Age: "
+                f"{raw.get('Age', 0):.0f} years"
+            )
+
         elif variable == "CMM_counts2":
             name = "Multimorbidity count >= 3"
+
         elif variable == "smoking_status3":
             name = (
                 "Smoking status: "
                 f"{raw.get('_smoking_label', 'Current smoker')}"
             )
+
         elif variable == "marital_status":
             name = (
                 "Marital status: "
                 f"{raw.get('_marital_label', 'Unpartnered')}"
             )
+
         elif variable == "Sex":
-            name = f"Sex: {'Male' if raw.get('Sex', 0) else 'Female'}"
+            name = (
+                "Sex: "
+                f"{'Male' if raw.get('Sex', 0) else 'Female'}"
+            )
+
         elif variable == "SRH":
             name = (
                 "Self-rated health: "
                 f"{raw.get('_srh_label', 'Suboptimal')}"
             )
+
         elif condition:
-            name = f"{get_display_name(variable, range_df)}: {condition}"
+            name = (
+                f"{get_display_name(variable, range_df)}: "
+                f"{condition}"
+            )
+
         else:
-            name = f"{get_display_name(variable, range_df)}: present"
+            name = (
+                f"{get_display_name(variable, range_df)}: "
+                "present"
+            )
 
         details.append(
             {
@@ -521,7 +804,11 @@ def calculate_score(raw, coef_df, range_df):
 
 def render_result_cards(score, threshold):
     low_risk = score <= threshold
-    risk_label = "Low risk" if low_risk else "High risk"
+    risk_label = (
+        "Low risk"
+        if low_risk
+        else "High risk"
+    )
 
     if low_risk:
         color = "#1D4ED8"
@@ -585,19 +872,37 @@ def render_contribution_chart(detail_df):
     ).copy()
 
     labels = [
-        f"+{value:.4f}" if value >= 0 else f"{value:.4f}"
+        (
+            f"+{value:.4f}"
+            if value >= 0
+            else f"{value:.4f}"
+        )
         for value in plot_df["Contribution"]
     ]
 
     colors = [
-        "#DC2626" if value > 0 else "#2563EB"
+        "#DC2626"
+        if value > 0
+        else "#2563EB"
         for value in plot_df["Contribution"]
     ]
 
-    figure_height = max(260, min(720, 100 + len(plot_df) * 48))
+    figure_height = max(
+        260,
+        min(
+            720,
+            100 + len(plot_df) * 48,
+        ),
+    )
 
-    max_contribution = float(plot_df["Contribution"].max())
-    right_margin = max(0.05, max_contribution * 0.20)
+    max_contribution = float(
+        plot_df["Contribution"].max()
+    )
+
+    right_margin = max(
+        0.05,
+        max_contribution * 0.20,
+    )
 
     fig = go.Figure(
         go.Bar(
@@ -619,7 +924,12 @@ def render_contribution_chart(detail_df):
 
     fig.update_layout(
         height=figure_height,
-        margin=dict(l=240, r=100, t=15, b=45),
+        margin=dict(
+            l=240,
+            r=100,
+            t=15,
+            b=45,
+        ),
         paper_bgcolor="#FFFFFF",
         plot_bgcolor="#FFFFFF",
         showlegend=False,
@@ -631,7 +941,10 @@ def render_contribution_chart(detail_df):
         ),
         xaxis=dict(
             title="Contribution to risk score",
-            range=[0, max_contribution + right_margin],
+            range=[
+                0,
+                max_contribution + right_margin,
+            ],
             showgrid=True,
             gridcolor="#E2E8F0",
             zeroline=True,
@@ -644,7 +957,9 @@ def render_contribution_chart(detail_df):
             showgrid=False,
             linecolor="#94A3B8",
             categoryorder="array",
-            categoryarray=plot_df["Risk indicator"].tolist(),
+            categoryarray=plot_df[
+                "Risk indicator"
+            ].tolist(),
             tickfont=dict(size=13),
             fixedrange=True,
         ),
@@ -661,7 +976,11 @@ def render_contribution_chart(detail_df):
 
 def main():
     coef_df, range_df, risk_cut = load_model()
-    raw, condition_count = get_user_inputs(coef_df, range_df)
+
+    raw, condition_count = get_user_inputs(
+        coef_df,
+        range_df,
+    )
 
     st.divider()
 
@@ -671,20 +990,34 @@ def main():
         use_container_width=True,
         disabled=condition_count < 2,
     ):
-        score, detail_df = calculate_score(raw, coef_df, range_df)
+        score, detail_df = calculate_score(
+            raw,
+            coef_df,
+            range_df,
+        )
 
         st.subheader("Prediction result")
-        render_result_cards(score, risk_cut)
+        render_result_cards(
+            score,
+            risk_cut,
+        )
 
         st.divider()
-        st.subheader("Contributing risk indicators")
+        st.subheader(
+            "Contributing risk indicators"
+        )
 
         if detail_df.empty:
-            st.info("No risk-increasing indicators were identified.")
+            st.info(
+                "No risk-increasing indicators were identified."
+            )
         else:
-            render_contribution_chart(detail_df)
+            render_contribution_chart(
+                detail_df
+            )
 
     st.divider()
+
     st.caption(
         "The calculated risk score and risk category are for reference only "
         "and should not be used as the basis for clinical decision-making."
