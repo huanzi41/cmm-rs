@@ -548,3 +548,147 @@ def render_result_cards(score, threshold):
                     {score:.4f}
                 </div>
             </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    with col2:
+        st.markdown(
+            f"""
+            <div style="background:{background};border:1px solid {border};
+                        border-radius:8px;padding:16px;text-align:center;
+                        min-height:112px;">
+                <div style="font-size:16px;color:{color};">
+                    Risk category
+                </div>
+                <div style="font-size:30px;font-weight:700;
+                            color:{color};margin-top:6px;">
+                    {risk_label}
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    st.caption(
+        "Risk assessment is classified into two categories: "
+        f"low risk (<={DISPLAY_RISK_CUTOFF:.2f}) and "
+        f"high risk (>{DISPLAY_RISK_CUTOFF:.2f}). "
+        "The value 1.11 represents the 90th percentile of the risk score "
+        "among older adults with cardiometabolic multimorbidity in Shenzhen."
+    )
+
+def render_contribution_chart(detail_df):
+    plot_df = detail_df.sort_values(
+        "Contribution",
+        ascending=True,
+    ).copy()
+
+    labels = [
+        f"+{value:.4f}" if value >= 0 else f"{value:.4f}"
+        for value in plot_df["Contribution"]
+    ]
+
+    colors = [
+        "#DC2626" if value > 0 else "#2563EB"
+        for value in plot_df["Contribution"]
+    ]
+
+    figure_height = max(260, min(720, 100 + len(plot_df) * 48))
+
+    max_contribution = float(plot_df["Contribution"].max())
+    right_margin = max(0.05, max_contribution * 0.20)
+
+    fig = go.Figure(
+        go.Bar(
+            x=plot_df["Contribution"],
+            y=plot_df["Risk indicator"],
+            orientation="h",
+            width=0.42,
+            marker_color=colors,
+            text=labels,
+            textposition="outside",
+            cliponaxis=False,
+            hovertemplate=(
+                "<b>%{y}</b><br>"
+                "Contribution: %{x:.4f}"
+                "<extra></extra>"
+            ),
+        )
+    )
+
+    fig.update_layout(
+        height=figure_height,
+        margin=dict(l=240, r=100, t=15, b=45),
+        paper_bgcolor="#FFFFFF",
+        plot_bgcolor="#FFFFFF",
+        showlegend=False,
+        bargap=0.45,
+        font=dict(
+            family="Arial, sans-serif",
+            size=13,
+            color="#0F172A",
+        ),
+        xaxis=dict(
+            title="Contribution to risk score",
+            range=[0, max_contribution + right_margin],
+            showgrid=True,
+            gridcolor="#E2E8F0",
+            zeroline=True,
+            zerolinecolor="#94A3B8",
+            linecolor="#94A3B8",
+            fixedrange=True,
+        ),
+        yaxis=dict(
+            title=None,
+            showgrid=False,
+            linecolor="#94A3B8",
+            categoryorder="array",
+            categoryarray=plot_df["Risk indicator"].tolist(),
+            tickfont=dict(size=13),
+            fixedrange=True,
+        ),
+    )
+
+    st.plotly_chart(
+        fig,
+        use_container_width=True,
+        config={
+            "displayModeBar": False,
+            "responsive": True,
+        },
+    )
+
+def main():
+    coef_df, range_df, risk_cut = load_model()
+    raw, condition_count = get_user_inputs(coef_df, range_df)
+
+    st.divider()
+
+    if st.button(
+        "Calculate risk",
+        type="primary",
+        use_container_width=True,
+        disabled=condition_count < 2,
+    ):
+        score, detail_df = calculate_score(raw, coef_df, range_df)
+
+        st.subheader("Prediction result")
+        render_result_cards(score, risk_cut)
+
+        st.divider()
+        st.subheader("Contributing risk indicators")
+
+        if detail_df.empty:
+            st.info("No risk-increasing indicators were identified.")
+        else:
+            render_contribution_chart(detail_df)
+
+    st.divider()
+    st.caption(
+        "The calculated risk score and risk category are for reference only "
+        "and should not be used as the basis for clinical decision-making."
+    )
+
+if __name__ == "__main__":
+    main()
