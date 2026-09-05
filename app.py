@@ -382,7 +382,7 @@ def get_user_inputs(coef_df, range_df):
     ]
 
     if laboratory_vars:
-        st.subheader("Clinical and laboratory measurements")
+        st.subheader("Laboratory measurements")
         lab_columns = st.columns(len(laboratory_vars))
 
         for index, variable in enumerate(laboratory_vars):
